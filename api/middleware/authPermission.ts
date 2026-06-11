@@ -10,6 +10,7 @@ declare global {
     interface Request {
       userContext?: UserContext;
       permissionSnapshot?: DocumentPermission;
+      shareToken?: string;
     }
   }
 }
@@ -61,11 +62,18 @@ export function requirePermission(options: PermissionCheckOptions) {
       }
 
       let permissionOverride: DocumentPermission | undefined;
-      if (options.useSnapshot && req.params.token) {
-        const snapshot = await ShareLinkService.getPermissionSnapshot(req.params.token);
-        if (snapshot) {
-          permissionOverride = snapshot.documentPermission;
+      if (options.useSnapshot) {
+        const token = req.params.token || req.shareToken;
+        if (token) {
+          const snapshot = await ShareLinkService.getPermissionSnapshot(token);
+          if (snapshot) {
+            permissionOverride = snapshot.documentPermission;
+          }
         }
+      }
+
+      if (!permissionOverride && req.permissionSnapshot) {
+        permissionOverride = req.permissionSnapshot;
       }
 
       let paragraphs: import('../../shared/types.js').Paragraph[] | undefined;
@@ -81,7 +89,8 @@ export function requirePermission(options: PermissionCheckOptions) {
         paragraphId || 'document',
         options.action,
         userContext,
-        paragraphs
+        paragraphs,
+        permissionOverride
       );
 
       if (!hasPermission) {
@@ -95,6 +104,8 @@ export function requirePermission(options: PermissionCheckOptions) {
           {
             path: req.path,
             method: req.method,
+            usingSnapshot: !!permissionOverride,
+            shareToken: req.shareToken,
           }
         );
 
@@ -142,6 +153,7 @@ export function attachPermissionSnapshot() {
         const snapshot = await ShareLinkService.getPermissionSnapshot(req.params.token);
         if (snapshot) {
           req.permissionSnapshot = snapshot.documentPermission;
+          req.shareToken = req.params.token;
         }
       } catch {
         // ignore

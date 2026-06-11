@@ -10,6 +10,16 @@ import type {
   Paragraph,
 } from '../../shared/types.js';
 import { FileStorageService } from './FileStorageService.js';
+import {
+  matchRule,
+  evaluateRules,
+  buildSectionMap,
+  calculateEffectivePermissionSync,
+  calculateAllParagraphPermissionsSync,
+  checkPermissionSync,
+  hashDocumentPermission,
+  getSnapshotCacheKey,
+} from '../utils/PermissionCalculator.js';
 
 function genRuleId() {
   return `rule_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -27,17 +37,6 @@ const permissionCache = new Map<string, CacheEntry>();
 let cacheHitCount = 0;
 let cacheMissCount = 0;
 
-function getCacheKey(docId: string, paragraphId: string | 'document', userContext: UserContext): string {
-  const userKey = [
-    userContext.userId || '',
-    userContext.email || '',
-    (userContext.groups || []).join(','),
-    (userContext.roles || []).join(','),
-    String(userContext.isAdmin || false),
-  ].join('|');
-  return `${docId}:${paragraphId}:${userKey}`;
-}
-
 function evictCacheIfNeeded() {
   if (permissionCache.size <= MAX_CACHE_ENTRIES) return;
   const entries = Array.from(permissionCache.entries());
@@ -49,6 +48,10 @@ function evictCacheIfNeeded() {
 }
 
 export class PermissionService {
+  static matchRule = matchRule;
+  static evaluateRules = evaluateRules;
+  static buildSectionMap = buildSectionMap;
+
   static async getDocumentPermission(docId: string): Promise<DocumentPermission | null> {
     const perm = await FileStorageService.readJson<DocumentPermission | null>(
       FileStorageService.getPermissionPath(docId),
@@ -187,92 +190,6 @@ export class PermissionService {
     return perm;
   }
 
-  static buildSectionMap(
-    paragraphs: Paragraph[],
-    paragraphPermissions: ParagraphPermission[]
-  ): Map<string, string> {
-    const sectionPermMap = new Map<string, ParagraphPermission>();
-    for (const pp of paragraphPermissions) {
-      if (pp.isSection && pp.cascadeToChildren) {
-        sectionPermMap.set(pp.paragraphId, pp);
-      }
-    }
-
-    const paragraphToSection = new Map<string, string>();
-    let currentSection: { id: string; level: number } | null = null;
-
-    for (const p of paragraphs) {
-      if (p.type === 'heading' && p.level !== undefined) {
-        const sectionPerm = sectionPermMap.get(p.id);
-        if (sectionPerm) {
-          currentSection = { id: p.id, level: p.level };
-        } else if (currentSection && p.level <= currentSection.level) {
-          currentSection = null;
-        }
-      }
-      if (currentSection && p.id !== currentSection.id) {
-        const sectionPerm = sectionPermMap.get(currentSection.id);
-        const existingPP = paragraphPermissions.find((pp) => pp.paragraphId === p.id);
-        if (!existingPP || existingPP.inheritFromDocument !== false) {
-          paragraphToSection.set(p.id, currentSection.id);
-        }
-      }
-    }
-
-    return paragraphToSection;
-  }
-
-  static matchRule(rule: PermissionRule, userContext: UserContext): boolean {
-    if (userContext.isAdmin) return true;
-
-    switch (rule.subjectType) {
-      case 'everyone':
-        return true;
-
-      case 'user':
-        return (
-          userContext.userId === rule.subjectValue ||
-          userContext.email?.toLowerCase() === rule.subjectValue.toLowerCase()
-        );
-
-      case 'group':
-        return userContext.groups?.includes(rule.subjectValue) || false;
-
-      case 'role':
-        return userContext.roles?.includes(rule.subjectValue) || false;
-
-      case 'domain': {
-        if (!userContext.email) return false;
-        const emailDomain = userContext.email.split('@')[1]?.toLowerCase();
-        const ruleDomain = rule.subjectValue.toLowerCase().replace(/^\*/, '');
-        return emailDomain === ruleDomain || emailDomain?.endsWith(ruleDomain.replace(/^\./, '')) || false;
-      }
-
-      default:
-        return false;
-    }
-  }
-
-  static evaluateRules(rules: PermissionRule[], userContext: UserContext): Set<PermissionAction> {
-    const allowedActions = new Set<PermissionAction>();
-    const deniedActions = new Set<PermissionAction>();
-
-    const sortedRules = [...rules].sort((a, b) => (b.priority || 0) - (a.priority || 0));
-
-    for (const rule of sortedRules) {
-      if (this.matchRule(rule, userContext)) {
-        if (rule.deny) {
-          rule.actions.forEach((a) => deniedActions.add(a));
-        } else {
-          rule.actions.forEach((a) => allowedActions.add(a));
-        }
-      }
-    }
-
-    deniedActions.forEach((a) => allowedActions.delete(a));
-    return allowedActions;
-  }
-
   static async calculateEffectivePermission(
     docId: string,
     paragraphId: string | 'document',
@@ -281,9 +198,11 @@ export class PermissionService {
     permissionOverride?: DocumentPermission,
     paragraphs?: Paragraph[]
   ): Promise<EffectivePermission> {
-    const cacheKey = getCacheKey(docId, paragraphId, userContext);
+    const docPerm = permissionOverride || (await this.getOrCreateDocumentPermission(docId));
+    const snapshotHash = permissionOverride ? hashDocumentPermission(permissionOverride) : undefined;
+    const cacheKey = getSnapshotCacheKey(docId, paragraphId, userContext, snapshotHash);
 
-    if (!forceRefresh) {
+    if (!forceRefresh && !permissionOverride) {
       const cached = permissionCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
         cacheHitCount++;
@@ -292,8 +211,6 @@ export class PermissionService {
     }
 
     cacheMissCount++;
-    const docPerm = permissionOverride || (await this.getOrCreateDocumentPermission(docId));
-    const matchedRules: string[] = [];
 
     if (userContext.isAdmin) {
       const perm: EffectivePermission = {
@@ -306,62 +223,26 @@ export class PermissionService {
         isAdmin: true,
         matchedRules: ['admin'],
       };
-      permissionCache.set(cacheKey, { permission: perm, timestamp: Date.now() });
-      evictCacheIfNeeded();
+      if (!permissionOverride) {
+        permissionCache.set(cacheKey, { permission: perm, timestamp: Date.now() });
+        evictCacheIfNeeded();
+      }
       return perm;
     }
 
-    let rules: PermissionRule[] = [...docPerm.defaultRules];
-    let inheritedFrom: string | undefined;
-
-    if (paragraphId !== 'document') {
-      const paragraphPerm = docPerm.paragraphPermissions.find((p) => p.paragraphId === paragraphId);
-      if (paragraphPerm) {
-        if (paragraphPerm.inheritFromDocument !== false) {
-          rules = [...rules, ...paragraphPerm.rules];
-        } else {
-          rules = paragraphPerm.rules;
-        }
-      } else if (paragraphs && paragraphs.length > 0) {
-        const sectionMap = this.buildSectionMap(paragraphs, docPerm.paragraphPermissions);
-        const sectionId = sectionMap.get(paragraphId);
-        if (sectionId) {
-          const sectionPerm = docPerm.paragraphPermissions.find((p) => p.paragraphId === sectionId);
-          if (sectionPerm) {
-            inheritedFrom = sectionId;
-            if (sectionPerm.inheritFromDocument !== false) {
-              rules = [...rules, ...sectionPerm.rules];
-            } else {
-              rules = [...sectionPerm.rules];
-            }
-          }
-        }
-      }
-    }
-
-    const sortedRules = rules.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-    for (const rule of sortedRules) {
-      if (this.matchRule(rule, userContext)) {
-        matchedRules.push(rule.id);
-      }
-    }
-
-    const allowedActions = this.evaluateRules(rules, userContext);
-
-    const perm: EffectivePermission = {
+    const perm = calculateEffectivePermissionSync({
+      docId,
       paragraphId,
-      canRead: allowedActions.has('read'),
-      canEdit: allowedActions.has('edit'),
-      canComment: allowedActions.has('comment') || allowedActions.has('annotate'),
-      canAnnotate: allowedActions.has('annotate'),
-      canShare: allowedActions.has('share'),
-      isAdmin: allowedActions.has('admin'),
-      matchedRules,
-      inheritedFrom,
-    };
+      userContext,
+      docPerm,
+      paragraphs,
+    });
 
-    permissionCache.set(cacheKey, { permission: perm, timestamp: Date.now() });
-    evictCacheIfNeeded();
+    if (!permissionOverride) {
+      permissionCache.set(cacheKey, { permission: perm, timestamp: Date.now() });
+      evictCacheIfNeeded();
+    }
+
     return perm;
   }
 
@@ -372,25 +253,14 @@ export class PermissionService {
     permissionOverride?: DocumentPermission,
     paragraphs?: Paragraph[]
   ): Promise<Map<string, EffectivePermission>> {
-    const results = new Map<string, EffectivePermission>();
     const docPerm = permissionOverride || (await this.getOrCreateDocumentPermission(docId));
-
-    const docLevelPerm = await this.calculateEffectivePermission(docId, 'document', userContext, false, docPerm);
-    results.set('document', docLevelPerm);
-
-    for (const paragraphId of paragraphIds) {
-      const perm = await this.calculateEffectivePermission(
-        docId,
-        paragraphId,
-        userContext,
-        false,
-        docPerm,
-        paragraphs
-      );
-      results.set(paragraphId, perm);
-    }
-
-    return results;
+    return calculateAllParagraphPermissionsSync(
+      docId,
+      paragraphIds,
+      userContext,
+      docPerm,
+      paragraphs
+    );
   }
 
   static async checkPermission(
@@ -398,31 +268,24 @@ export class PermissionService {
     paragraphId: string | 'document',
     action: PermissionAction,
     userContext: UserContext,
-    paragraphs?: Paragraph[]
+    paragraphs?: Paragraph[],
+    permissionOverride?: DocumentPermission
   ): Promise<boolean> {
-    const perm = await this.calculateEffectivePermission(docId, paragraphId, userContext, false, undefined, paragraphs);
-    switch (action) {
-      case 'read':
-        return perm.canRead;
-      case 'edit':
-        return perm.canEdit;
-      case 'comment':
-        return perm.canComment;
-      case 'annotate':
-        return perm.canAnnotate;
-      case 'share':
-        return perm.canShare;
-      case 'admin':
-        return perm.isAdmin;
-      default:
-        return false;
-    }
+    const docPerm = permissionOverride || (await this.getOrCreateDocumentPermission(docId));
+    return checkPermissionSync(
+      docId,
+      paragraphId,
+      action,
+      userContext,
+      docPerm,
+      paragraphs
+    );
   }
 
   static invalidateCache(docId?: string): void {
     if (docId) {
       for (const key of permissionCache.keys()) {
-        if (key.startsWith(`${docId}:`)) {
+        if (key.includes(`:${docId}:`)) {
           permissionCache.delete(key);
         }
       }

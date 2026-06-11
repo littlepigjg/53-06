@@ -1,6 +1,8 @@
 import type { AuditLogEntry, AuditLogType, PermissionAction, UserContext, AlertNotification, PermissionAlertConfig } from '../../shared/types.js';
 import { FileStorageService } from './FileStorageService.js';
 import { PermissionService } from './PermissionService.js';
+import { EmailService } from './EmailService.js';
+import { DocumentService } from './DocumentService.js';
 
 function genLogId() {
   return `log_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -73,7 +75,10 @@ export class AuditLogService {
     return log;
   }
 
-  private static notifyAdmin(log: AuditLogEntry): void {
+  private static async notifyAdmin(log: AuditLogEntry): Promise<void> {
+    const alertConfig = await PermissionService.getAlertConfig(log.docId);
+    const config = alertConfig || DEFAULT_ALERT_CONFIG;
+
     const alert = {
       level: 'WARNING',
       message: `Unauthorized access attempt detected`,
@@ -85,6 +90,23 @@ export class AuditLogService {
       ip: log.ip,
     };
     console.warn('[SECURITY ALERT]', JSON.stringify(alert, null, 2));
+
+    if (config.notifyEmails && config.notifyEmails.length > 0 && EmailService.isConfigured()) {
+      try {
+        const doc = await DocumentService.get(log.docId);
+        await EmailService.sendAccessDeniedAlert(config.notifyEmails, {
+          docId: log.docId,
+          docTitle: doc?.title,
+          paragraphId: log.paragraphId,
+          action: log.action || 'unknown',
+          user: log.userContext,
+          ip: log.ip,
+          timestamp: log.timestamp,
+        });
+      } catch (e) {
+        console.error('[ALERT EMAIL ERROR]', e);
+      }
+    }
   }
 
   private static async checkAlertThreshold(docId: string): Promise<void> {
@@ -142,6 +164,25 @@ export class AuditLogService {
         },
       });
 
+      if (config.notifyEmails && config.notifyEmails.length > 0 && EmailService.isConfigured()) {
+        try {
+          const doc = await DocumentService.get(docId);
+          await EmailService.sendAlert(config.notifyEmails, {
+            docId,
+            docTitle: doc?.title,
+            severity: notification.severity,
+            message: notification.message,
+            triggerCount: notification.triggerCount,
+            windowMinutes: config.accessDeniedWindowMinutes,
+            affectedUsers: notification.affectedUsers,
+            alertId: notification.id,
+            createdAt: notification.createdAt,
+          });
+        } catch (e) {
+          console.error('[ALERT EMAIL ERROR]', e);
+        }
+      }
+
       if (config.escalationEnabled && recentDeniedLogs.length >= config.escalationThreshold) {
         const escalation: AlertNotification = {
           ...notification,
@@ -152,21 +193,14 @@ export class AuditLogService {
         };
         await this.saveAlert(docId, escalation);
 
-        this.escalationNotify(escalation, config);
-      }
-
-      if (config.notifyEmails && config.notifyEmails.length > 0) {
-        console.info(
-          '[ALERT EMAIL]',
-          `Notifying ${config.notifyEmails.join(', ')}: ${notification.message}`
-        );
+        await this.escalationNotify(escalation, config);
       }
     } catch (e) {
       console.error('[ALERT CHECK ERROR]', e);
     }
   }
 
-  private static escalationNotify(alert: AlertNotification, config: PermissionAlertConfig): void {
+  private static async escalationNotify(alert: AlertNotification, config: PermissionAlertConfig): Promise<void> {
     const escalationData = {
       level: 'CRITICAL',
       message: alert.message,
@@ -178,6 +212,25 @@ export class AuditLogService {
       timestamp: alert.createdAt,
     };
     console.error('[SECURITY ESCALATION]', JSON.stringify(escalationData, null, 2));
+
+    if (config.notifyEmails && config.notifyEmails.length > 0 && EmailService.isConfigured()) {
+      try {
+        const doc = await DocumentService.get(alert.docId);
+        await EmailService.sendAlert(config.notifyEmails, {
+          docId: alert.docId,
+          docTitle: doc?.title,
+          severity: alert.severity,
+          message: alert.message,
+          triggerCount: alert.triggerCount,
+          windowMinutes: config.accessDeniedWindowMinutes,
+          affectedUsers: alert.affectedUsers,
+          alertId: alert.id,
+          createdAt: alert.createdAt,
+        });
+      } catch (e) {
+        console.error('[ESCALATION EMAIL ERROR]', e);
+      }
+    }
   }
 
   static async getAlertsPath(docId: string): Promise<string> {
