@@ -7,7 +7,9 @@ import shareRouter from './routes/share.js';
 import annotationsRouter from './routes/annotations.js';
 import reviewRouter from './routes/review.js';
 import exportRouter from './routes/export.js';
+import permissionsRouter from './routes/permissions.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { authMiddleware } from './middleware/authPermission.js';
 import { FileStorageService } from './services/FileStorageService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,12 +25,14 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(publicDir));
 app.use('/assets', express.static(path.join(distDir, 'assets')));
+app.use(authMiddleware);
 
 app.use('/api/documents', documentsRouter);
 app.use('/api/share', shareRouter);
 app.use('/api/annotations', annotationsRouter);
 app.use('/api/review', reviewRouter);
 app.use('/api/export', exportRouter);
+app.use('/api/permissions', permissionsRouter);
 
 app.get(['/', '/review/*', '/admin/*'], (_req, res) => {
   res.sendFile(path.join(distDir, 'index.html'));

@@ -7,6 +7,11 @@ const DATA_DIR = path.resolve(__dirname, '..', 'data');
 const ANNOTATIONS_DIR = path.join(DATA_DIR, 'annotations');
 const PARSED_DIR = path.join(DATA_DIR, 'parsed');
 const UPLOADS_DIR = path.resolve(__dirname, '..', '..', 'uploads');
+const PERMISSIONS_DIR = path.join(DATA_DIR, 'permissions');
+const AUDIT_LOGS_DIR = path.join(DATA_DIR, 'audit-logs');
+const TEMPLATES_DIR = path.join(DATA_DIR, 'templates');
+const SHARE_LINKS_DIR = path.join(DATA_DIR, 'share-links');
+const ALERTS_DIR = path.join(DATA_DIR, 'alerts');
 const DOCUMENTS_FILE = path.join(DATA_DIR, 'documents.json');
 
 export class FileStorageService {
@@ -16,6 +21,11 @@ export class FileStorageService {
       fs.mkdir(ANNOTATIONS_DIR, { recursive: true }),
       fs.mkdir(PARSED_DIR, { recursive: true }),
       fs.mkdir(UPLOADS_DIR, { recursive: true }),
+      fs.mkdir(PERMISSIONS_DIR, { recursive: true }),
+      fs.mkdir(AUDIT_LOGS_DIR, { recursive: true }),
+      fs.mkdir(TEMPLATES_DIR, { recursive: true }),
+      fs.mkdir(SHARE_LINKS_DIR, { recursive: true }),
+      fs.mkdir(ALERTS_DIR, { recursive: true }),
     ]);
     try {
       await fs.access(DOCUMENTS_FILE);
@@ -52,6 +62,26 @@ export class FileStorageService {
 
   static getUploadsPath() {
     return UPLOADS_DIR;
+  }
+
+  static getPermissionPath(docId: string) {
+    return path.join(PERMISSIONS_DIR, `${docId}.json`);
+  }
+
+  static getAuditLogsPath(docId: string) {
+    return path.join(AUDIT_LOGS_DIR, `${docId}.json`);
+  }
+
+  static getTemplatesPath() {
+    return path.join(TEMPLATES_DIR, 'templates.json');
+  }
+
+  static getShareLinksPath() {
+    return path.join(SHARE_LINKS_DIR, 'share-links.json');
+  }
+
+  static getAlertsPath(docId: string) {
+    return path.join(ALERTS_DIR, `${docId}.json`);
   }
 
   static async deleteFile(filePath: string) {

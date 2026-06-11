@@ -11,11 +11,11 @@ import {
   Wand2,
   MessageSquare,
   Clock,
+  Shield,
 } from 'lucide-react';
-import { documentsApi, annotationsApi, reviewApi, exportApi } from '../utils/api';
+import { documentsApi, annotationsApi, reviewApi, exportApi, ParsedWithPermissions } from '../utils/api';
 import type {
   DocumentMeta,
-  ParsedDocument,
   Annotation,
   ReviewSummary,
   AnnotationStatus,
@@ -25,16 +25,19 @@ import type {
 import { SummaryStats } from '../components/SummaryStats';
 import { AnnotationCard } from '../components/AnnotationCard';
 import { DocumentReader } from '../components/DocumentReader';
+import { PermissionManager } from '../components/PermissionManager';
+import { UserContextPanel } from '../components/PermissionControlled';
 
 type FilterStatus = 'all' | AnnotationStatus;
 type FilterType = 'all' | AnnotationType;
 
 export function AdminPage() {
   const { docId } = useParams<{ docId: string }>();
+  const [activeTab, setActiveTab] = useState<'review' | 'permission'>('review');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [docMeta, setDocMeta] = useState<DocumentMeta | null>(null);
-  const [parsed, setParsed] = useState<ParsedDocument | null>(null);
+  const [parsed, setParsed] = useState<ParsedWithPermissions | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [summary, setSummary] = useState<ReviewSummary | null>(null);
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('all');
@@ -49,7 +52,7 @@ export function AdminPage() {
       setLoading(true);
       const [doc, parsedDoc, anns, sum]: [
         DocumentMeta,
-        ParsedDocument,
+        ParsedWithPermissions,
         Annotation[],
         ReviewSummary
       ] = await Promise.all([
@@ -124,7 +127,7 @@ export function AdminPage() {
     let token = docMeta.shareToken;
     if (!token) {
       const res = await documentsApi.createShare(docMeta.id);
-      token = res.shareToken;
+      token = res.token;
       setDocMeta({ ...docMeta, shareToken: token });
     }
     await navigator.clipboard.writeText(`${window.location.origin}/review/${token}`);
@@ -181,25 +184,59 @@ export function AdminPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleCopyShare}
-              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-            >
-              {copied ? <Check size={14} /> : <Share2 size={14} />}
-              {copied ? '已复制' : '复制分享链接'}
-            </button>
-            <button
-              onClick={handleExport}
-              className="inline-flex items-center gap-1 rounded-md bg-[#1e3a5f] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2e4e7a]"
-            >
-              <Download size={14} /> 导出最终文档
-            </button>
+            <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5">
+              <button
+                onClick={() => setActiveTab('review')}
+                className={`inline-flex items-center gap-1 rounded px-3 py-1 text-sm ${
+                  activeTab === 'review'
+                    ? 'bg-[#1e3a5f] text-white'
+                    : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <MessageSquare size={14} /> 审阅管理
+              </button>
+              <button
+                onClick={() => setActiveTab('permission')}
+                className={`inline-flex items-center gap-1 rounded px-3 py-1 text-sm ${
+                  activeTab === 'permission'
+                    ? 'bg-[#1e3a5f] text-white'
+                    : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Shield size={14} /> 权限管理
+              </button>
+            </div>
+            {activeTab === 'review' && (
+              <>
+                <button
+                  onClick={handleCopyShare}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  {copied ? <Check size={14} /> : <Share2 size={14} />}
+                  {copied ? '已复制' : '复制分享链接'}
+                </button>
+                <button
+                  onClick={handleExport}
+                  className="inline-flex items-center gap-1 rounded-md bg-[#1e3a5f] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2e4e7a]"
+                >
+                  <Download size={14} /> 导出最终文档
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-6">
-        <SummaryStats summary={summary} />
+        <div className="mb-4 flex justify-end">
+          <UserContextPanel compact />
+        </div>
+
+        {activeTab === 'permission' && docId ? (
+          <PermissionManager docId={docId} paragraphs={parsed?.paragraphs || []} />
+        ) : (
+          <>
+            <SummaryStats summary={summary} />
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center gap-2">
@@ -264,6 +301,7 @@ export function AdminPage() {
                   onParagraphClick={(p: Paragraph) =>
                     setSelectedParagraphId((cur) => (cur === p.id ? null : p.id))
                   }
+                  effectivePermissions={parsed.effectivePermissions}
                 />
               </div>
             </div>
@@ -316,6 +354,8 @@ export function AdminPage() {
             )}
           </div>
         </div>
+          </>
+        )}
       </main>
     </div>
   );

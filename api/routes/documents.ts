@@ -6,6 +6,9 @@ import { DocumentService } from '../services/DocumentService.js';
 import { DocumentParser } from '../services/DocumentParser.js';
 import { ShareLinkService } from '../services/ShareLinkService.js';
 import { FileStorageService } from '../services/FileStorageService.js';
+import { PermissionService } from '../services/PermissionService.js';
+import { AnnotationService } from '../services/AnnotationService.js';
+import { extractUserContext, requireAdmin } from '../middleware/authPermission.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads');
@@ -48,17 +51,50 @@ router.get('/:id', async (req, res, next) => {
 
 router.get('/:id/parsed', async (req, res, next) => {
   try {
+    const userContext = extractUserContext(req);
     const parsed = await DocumentParser.getParsed(req.params.id);
-    res.json(parsed);
+    const annotations = await AnnotationService.list(req.params.id);
+
+    const paragraphIds = parsed.paragraphs.map((p) => p.id);
+    const allPerms = await PermissionService.calculateAllParagraphPermissions(
+      req.params.id,
+      paragraphIds,
+      userContext
+    );
+
+    const visibleParagraphs = parsed.paragraphs.filter((p) => {
+      const perm = allPerms.get(p.id);
+      return perm?.canRead;
+    });
+
+    const visibleParagraphIds = new Set(visibleParagraphs.map((p) => p.id));
+    const visibleAnnotations = annotations.filter((a) =>
+      visibleParagraphIds.has(a.paragraphId)
+    );
+
+    const effectivePermissions: Record<string, unknown> = {};
+    allPerms.forEach((value, key) => {
+      effectivePermissions[key] = value;
+    });
+
+    res.json({
+      ...parsed,
+      paragraphs: visibleParagraphs,
+      annotations: visibleAnnotations,
+      effectivePermissions,
+    });
   } catch (e) {
     next(e);
   }
 });
 
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requireAdmin, async (req, res, next) => {
   try {
     const ok = await DocumentService.remove(req.params.id);
     if (!ok) return res.status(404).json({ error: 'Not found' });
+    await PermissionService.deleteDocumentPermission(req.params.id);
+    await FileStorageService.deleteFile(FileStorageService.getAuditLogsPath(req.params.id));
+    await ShareLinkService.revokeByDocId(req.params.id);
     res.json({ ok: true });
   } catch (e) {
     next(e);

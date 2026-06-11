@@ -31,9 +31,9 @@ export function DocumentList({ documents, onDeleted, onShareGenerated }: Documen
       setTimeout(() => setCopiedId(null), 1500);
       return;
     }
-    const { shareToken } = await documentsApi.createShare(doc.id);
-    onShareGenerated(doc.id, shareToken);
-    const url = `${window.location.origin}/review/${shareToken}`;
+    const { token } = await documentsApi.createShare(doc.id);
+    onShareGenerated(doc.id, token);
+    const url = `${window.location.origin}/review/${token}`;
     await navigator.clipboard.writeText(url);
     setCopiedId(doc.id);
     setTimeout(() => setCopiedId(null), 1500);

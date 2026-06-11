@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { FileText, AlertCircle, ArrowLeft } from 'lucide-react';
-import { shareApi, annotationsApi } from '../utils/api';
+import { shareApi, annotationsApi, ParsedWithPermissions } from '../utils/api';
 import { useReviewStore } from '../store/reviewStore';
-import type { DocumentMeta, ParsedDocument, Annotation } from '../types';
+import type { DocumentMeta, Annotation } from '../types';
 import { DocumentReader } from '../components/DocumentReader';
 import { ReviewPanel } from '../components/ReviewPanel';
 
@@ -16,7 +16,7 @@ export function ReviewPage() {
   const setParsed = useReviewStore((s) => s.setParsed);
   const setAnnotations = useReviewStore((s) => s.setAnnotations);
   const document = useReviewStore((s) => s.document);
-  const parsed = useReviewStore((s) => s.parsed);
+  const parsed = useReviewStore((s) => s.parsed) as ParsedWithPermissions | null;
   const annotations = useReviewStore((s) => s.annotations);
 
   useEffect(() => {
@@ -92,7 +92,11 @@ export function ReviewPage() {
 
       <div className="flex flex-1 min-h-0">
         <main className="flex-1 overflow-y-auto bg-[#fafafa]">
-          <DocumentReader paragraphs={parsed.paragraphs} annotations={annotations} />
+          <DocumentReader
+            paragraphs={parsed.paragraphs}
+            annotations={annotations}
+            effectivePermissions={parsed.effectivePermissions}
+          />
         </main>
         <div className="w-[380px] shrink-0">
           <ReviewPanel paragraphs={parsed.paragraphs} annotations={annotations} />
