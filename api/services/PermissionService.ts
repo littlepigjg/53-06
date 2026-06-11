@@ -10,6 +10,7 @@ import type {
   Paragraph,
 } from '../../shared/types.js';
 import { FileStorageService } from './FileStorageService.js';
+import { CacheService, buildCacheKey } from '../utils/CacheService.js';
 import {
   matchRule,
   evaluateRules,
@@ -18,33 +19,50 @@ import {
   calculateAllParagraphPermissionsSync,
   checkPermissionSync,
   hashDocumentPermission,
-  getSnapshotCacheKey,
 } from '../utils/PermissionCalculator.js';
 
 function genRuleId() {
   return `rule_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-const MAX_CACHE_ENTRIES = 1000;
-const CACHE_TTL = 5 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 2000;
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
-interface CacheEntry {
-  permission: EffectivePermission;
-  timestamp: number;
+const realtimeCache = new CacheService<EffectivePermission>({
+  maxEntries: MAX_CACHE_ENTRIES,
+  ttlMs: CACHE_TTL_MS,
+});
+
+const snapshotCache = new CacheService<EffectivePermission>({
+  maxEntries: MAX_CACHE_ENTRIES,
+  ttlMs: 30 * 60 * 1000,
+});
+
+function getUserKey(userContext: UserContext): string {
+  return buildCacheKey([
+    userContext.userId || '',
+    userContext.email || '',
+    (userContext.groups || []).join(','),
+    (userContext.roles || []).join(','),
+    String(userContext.isAdmin || false),
+  ]);
 }
 
-const permissionCache = new Map<string, CacheEntry>();
-let cacheHitCount = 0;
-let cacheMissCount = 0;
+function getRealtimeCacheKey(
+  docId: string,
+  paragraphId: string | 'document',
+  userContext: UserContext
+): string {
+  return buildCacheKey([docId, paragraphId, getUserKey(userContext)]);
+}
 
-function evictCacheIfNeeded() {
-  if (permissionCache.size <= MAX_CACHE_ENTRIES) return;
-  const entries = Array.from(permissionCache.entries());
-  entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-  const toRemove = entries.slice(0, permissionCache.size - MAX_CACHE_ENTRIES);
-  for (const [key] of toRemove) {
-    permissionCache.delete(key);
-  }
+function getSnapshotCacheKey(
+  snapshotHash: string,
+  docId: string,
+  paragraphId: string | 'document',
+  userContext: UserContext
+): string {
+  return buildCacheKey([snapshotHash, docId, paragraphId, getUserKey(userContext)]);
 }
 
 export class PermissionService {
@@ -85,7 +103,7 @@ export class PermissionService {
   static async saveDocumentPermission(permission: DocumentPermission): Promise<void> {
     permission.updatedAt = new Date().toISOString();
     await FileStorageService.writeJson(FileStorageService.getPermissionPath(permission.docId), permission);
-    this.invalidateCache(permission.docId);
+    this.invalidateRealtimeCache(permission.docId);
   }
 
   static async setDefaultRules(docId: string, rules: Omit<PermissionRule, 'id'>[]): Promise<DocumentPermission> {
@@ -194,26 +212,54 @@ export class PermissionService {
     docId: string,
     paragraphId: string | 'document',
     userContext: UserContext,
-    forceRefresh = false,
-    permissionOverride?: DocumentPermission,
-    paragraphs?: Paragraph[]
+    options: {
+      forceRefresh?: boolean;
+      permissionOverride?: DocumentPermission;
+      paragraphs?: Paragraph[];
+    } = {}
   ): Promise<EffectivePermission> {
-    const docPerm = permissionOverride || (await this.getOrCreateDocumentPermission(docId));
-    const snapshotHash = permissionOverride ? hashDocumentPermission(permissionOverride) : undefined;
-    const cacheKey = getSnapshotCacheKey(docId, paragraphId, userContext, snapshotHash);
+    const { forceRefresh = false, permissionOverride, paragraphs } = options;
 
-    if (!forceRefresh && !permissionOverride) {
-      const cached = permissionCache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        cacheHitCount++;
-        return cached.permission;
+    if (permissionOverride) {
+      const snapshotHash = hashDocumentPermission(permissionOverride);
+      const cacheKey = getSnapshotCacheKey(snapshotHash, docId, paragraphId, userContext);
+
+      if (!forceRefresh) {
+        const cached = snapshotCache.get(cacheKey);
+        if (cached) {
+          return cached;
+        }
+      }
+
+      const perm = this.calculateSync(docId, paragraphId, userContext, permissionOverride, paragraphs);
+      snapshotCache.set(cacheKey, perm);
+      return perm;
+    }
+
+    const cacheKey = getRealtimeCacheKey(docId, paragraphId, userContext);
+
+    if (!forceRefresh) {
+      const cached = realtimeCache.get(cacheKey);
+      if (cached) {
+        return cached;
       }
     }
 
-    cacheMissCount++;
+    const docPerm = await this.getOrCreateDocumentPermission(docId);
+    const perm = this.calculateSync(docId, paragraphId, userContext, docPerm, paragraphs);
+    realtimeCache.set(cacheKey, perm);
+    return perm;
+  }
 
+  private static calculateSync(
+    docId: string,
+    paragraphId: string | 'document',
+    userContext: UserContext,
+    docPerm: DocumentPermission,
+    paragraphs?: Paragraph[]
+  ): EffectivePermission {
     if (userContext.isAdmin) {
-      const perm: EffectivePermission = {
+      return {
         paragraphId,
         canRead: true,
         canEdit: true,
@@ -223,44 +269,102 @@ export class PermissionService {
         isAdmin: true,
         matchedRules: ['admin'],
       };
-      if (!permissionOverride) {
-        permissionCache.set(cacheKey, { permission: perm, timestamp: Date.now() });
-        evictCacheIfNeeded();
-      }
-      return perm;
     }
 
-    const perm = calculateEffectivePermissionSync({
+    return calculateEffectivePermissionSync({
       docId,
       paragraphId,
       userContext,
       docPerm,
       paragraphs,
     });
-
-    if (!permissionOverride) {
-      permissionCache.set(cacheKey, { permission: perm, timestamp: Date.now() });
-      evictCacheIfNeeded();
-    }
-
-    return perm;
   }
 
   static async calculateAllParagraphPermissions(
     docId: string,
     paragraphIds: string[],
     userContext: UserContext,
-    permissionOverride?: DocumentPermission,
-    paragraphs?: Paragraph[]
+    options: {
+      permissionOverride?: DocumentPermission;
+      paragraphs?: Paragraph[];
+    } = {}
   ): Promise<Map<string, EffectivePermission>> {
-    const docPerm = permissionOverride || (await this.getOrCreateDocumentPermission(docId));
-    return calculateAllParagraphPermissionsSync(
-      docId,
-      paragraphIds,
-      userContext,
-      docPerm,
-      paragraphs
-    );
+    const { permissionOverride, paragraphs } = options;
+    const results = new Map<string, EffectivePermission>();
+    const uncachedIds: string[] = [];
+
+    if (permissionOverride) {
+      const snapshotHash = hashDocumentPermission(permissionOverride);
+      for (const pid of paragraphIds) {
+        const cacheKey = getSnapshotCacheKey(snapshotHash, docId, pid, userContext);
+        const cached = snapshotCache.get(cacheKey);
+        if (cached) {
+          results.set(pid, cached);
+        } else {
+          uncachedIds.push(pid);
+        }
+      }
+
+      const docCacheKey = getSnapshotCacheKey(snapshotHash, docId, 'document', userContext);
+      const docCached = snapshotCache.get(docCacheKey);
+      if (docCached) {
+        results.set('document', docCached);
+      }
+
+      if (uncachedIds.length > 0 || !docCached) {
+        const docPerm = permissionOverride;
+        const allUncachedIds = !docCached ? ['document', ...uncachedIds] : uncachedIds;
+        const computed = calculateAllParagraphPermissionsSync(
+          docId,
+          allUncachedIds.filter((id) => id !== 'document'),
+          userContext,
+          docPerm,
+          paragraphs
+        );
+
+        for (const [id, perm] of computed) {
+          results.set(id, perm);
+          const key = getSnapshotCacheKey(snapshotHash, docId, id, userContext);
+          snapshotCache.set(key, perm);
+        }
+      }
+    } else {
+      for (const pid of paragraphIds) {
+        const cacheKey = getRealtimeCacheKey(docId, pid, userContext);
+        const cached = realtimeCache.get(cacheKey);
+        if (cached) {
+          results.set(pid, cached);
+        } else {
+          uncachedIds.push(pid);
+        }
+      }
+
+      const docCacheKey = getRealtimeCacheKey(docId, 'document', userContext);
+      const docCached = realtimeCache.get(docCacheKey);
+      if (docCached) {
+        results.set('document', docCached);
+      }
+
+      if (uncachedIds.length > 0 || !docCached) {
+        const docPerm = await this.getOrCreateDocumentPermission(docId);
+        const allUncachedIds = !docCached ? ['document', ...uncachedIds] : uncachedIds;
+        const computed = calculateAllParagraphPermissionsSync(
+          docId,
+          allUncachedIds.filter((id) => id !== 'document'),
+          userContext,
+          docPerm,
+          paragraphs
+        );
+
+        for (const [id, perm] of computed) {
+          results.set(id, perm);
+          const key = getRealtimeCacheKey(docId, id, userContext);
+          realtimeCache.set(key, perm);
+        }
+      }
+    }
+
+    return results;
   }
 
   static async checkPermission(
@@ -268,51 +372,77 @@ export class PermissionService {
     paragraphId: string | 'document',
     action: PermissionAction,
     userContext: UserContext,
-    paragraphs?: Paragraph[],
-    permissionOverride?: DocumentPermission
+    options: {
+      paragraphs?: Paragraph[];
+      permissionOverride?: DocumentPermission;
+    } = {}
   ): Promise<boolean> {
-    const docPerm = permissionOverride || (await this.getOrCreateDocumentPermission(docId));
-    return checkPermissionSync(
-      docId,
-      paragraphId,
-      action,
-      userContext,
-      docPerm,
-      paragraphs
-    );
-  }
-
-  static invalidateCache(docId?: string): void {
-    if (docId) {
-      for (const key of permissionCache.keys()) {
-        if (key.includes(`:${docId}:`)) {
-          permissionCache.delete(key);
-        }
-      }
-    } else {
-      permissionCache.clear();
+    const perm = await this.calculateEffectivePermission(docId, paragraphId, userContext, options);
+    switch (action) {
+      case 'read':
+        return perm.canRead;
+      case 'edit':
+        return perm.canEdit;
+      case 'comment':
+        return perm.canComment;
+      case 'annotate':
+        return perm.canAnnotate;
+      case 'share':
+        return perm.canShare;
+      case 'admin':
+        return perm.isAdmin;
+      default:
+        return false;
     }
   }
 
+  static invalidateRealtimeCache(docId?: string): void {
+    if (docId) {
+      realtimeCache.deleteByPattern(`${docId}:`);
+    } else {
+      realtimeCache.clear();
+    }
+  }
+
+  static invalidateSnapshotCache(snapshotHash?: string): void {
+    if (snapshotHash) {
+      snapshotCache.deleteByPrefix(`${snapshotHash}:`);
+    } else {
+      snapshotCache.clear();
+    }
+  }
+
+  static invalidateAllCache(): void {
+    realtimeCache.clear();
+    snapshotCache.clear();
+  }
+
   static getCacheStats(): PermissionCacheStats {
-    const entries = Array.from(permissionCache.entries()).map(([key, entry]) => ({
-      key,
-      age: Date.now() - entry.timestamp,
-    }));
-    const total = cacheHitCount + cacheMissCount;
+    const realtimeStats = realtimeCache.getStats();
+    const snapshotStats = snapshotCache.getStats();
+    const totalEntries = realtimeStats.totalEntries + snapshotStats.totalEntries;
+    const totalHits = realtimeStats.hitCount + snapshotStats.hitCount;
+    const totalMisses = realtimeStats.missCount + snapshotStats.missCount;
+    const total = totalHits + totalMisses;
+
+    const entries = [
+      ...realtimeStats.sampleKeys.slice(0, 25).map((k) => ({ key: `rt:${k}`, age: 0 })),
+      ...snapshotStats.sampleKeys.slice(0, 25).map((k) => ({ key: `snap:${k}`, age: 0 })),
+    ];
+
     return {
-      totalEntries: permissionCache.size,
-      maxEntries: MAX_CACHE_ENTRIES,
-      hitCount: cacheHitCount,
-      missCount: cacheMissCount,
-      hitRate: total > 0 ? cacheHitCount / total : 0,
-      entries: entries.slice(0, 50),
+      totalEntries,
+      maxEntries: MAX_CACHE_ENTRIES * 2,
+      hitCount: totalHits,
+      missCount: totalMisses,
+      hitRate: total > 0 ? totalHits / total : 0,
+      entries: entries.slice(0, 50) as unknown as { key: string; age: number }[],
     };
   }
 
   static resetCacheStats(): void {
-    cacheHitCount = 0;
-    cacheMissCount = 0;
+    realtimeCache.resetStats();
+    snapshotCache.resetStats();
   }
 
   static diffSnapshots(
@@ -395,7 +525,7 @@ export class PermissionService {
 
   static async deleteDocumentPermission(docId: string): Promise<void> {
     await FileStorageService.deleteFile(FileStorageService.getPermissionPath(docId));
-    this.invalidateCache(docId);
+    this.invalidateRealtimeCache(docId);
   }
 
   static async setAlertConfig(docId: string, config: import('../../shared/types.js').PermissionAlertConfig): Promise<DocumentPermission> {

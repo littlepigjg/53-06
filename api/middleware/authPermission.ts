@@ -33,6 +33,14 @@ export function extractUserContext(req: Request): UserContext {
   };
 }
 
+export function extractShareToken(req: Request): string | undefined {
+  if (req.params.token) return req.params.token;
+  if (req.query.shareToken && typeof req.query.shareToken === 'string') return req.query.shareToken;
+  const headerToken = req.headers['x-share-token'];
+  if (headerToken && typeof headerToken === 'string') return headerToken;
+  return undefined;
+}
+
 export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {
   req.userContext = extractUserContext(req);
   next();
@@ -43,7 +51,6 @@ export interface PermissionCheckOptions {
   docIdParam?: string;
   paragraphIdParam?: string;
   requireDocPermission?: boolean;
-  useSnapshot?: boolean;
 }
 
 export function requirePermission(options: PermissionCheckOptions) {
@@ -61,20 +68,7 @@ export function requirePermission(options: PermissionCheckOptions) {
         return res.status(400).json({ error: 'Document ID is required' });
       }
 
-      let permissionOverride: DocumentPermission | undefined;
-      if (options.useSnapshot) {
-        const token = req.params.token || req.shareToken;
-        if (token) {
-          const snapshot = await ShareLinkService.getPermissionSnapshot(token);
-          if (snapshot) {
-            permissionOverride = snapshot.documentPermission;
-          }
-        }
-      }
-
-      if (!permissionOverride && req.permissionSnapshot) {
-        permissionOverride = req.permissionSnapshot;
-      }
+      const permissionOverride: DocumentPermission | undefined = req.permissionSnapshot;
 
       let paragraphs: import('../../shared/types.js').Paragraph[] | undefined;
       try {
@@ -89,8 +83,10 @@ export function requirePermission(options: PermissionCheckOptions) {
         paragraphId || 'document',
         options.action,
         userContext,
-        paragraphs,
-        permissionOverride
+        {
+          paragraphs,
+          permissionOverride,
+        }
       );
 
       if (!hasPermission) {
@@ -114,6 +110,7 @@ export function requirePermission(options: PermissionCheckOptions) {
           requiredAction: options.action,
           docId,
           paragraphId,
+          usingSnapshot: !!permissionOverride,
         });
       }
 
@@ -148,17 +145,54 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 
 export function attachPermissionSnapshot() {
   return async (req: Request, _res: Response, next: NextFunction) => {
-    if (req.params.token) {
-      try {
-        const snapshot = await ShareLinkService.getPermissionSnapshot(req.params.token);
-        if (snapshot) {
-          req.permissionSnapshot = snapshot.documentPermission;
-          req.shareToken = req.params.token;
-        }
-      } catch {
-        // ignore
-      }
+    if (req.permissionSnapshot) {
+      next();
+      return;
     }
+
+    const token = extractShareToken(req);
+    if (!token) {
+      next();
+      return;
+    }
+
+    try {
+      const snapshot = await ShareLinkService.getPermissionSnapshot(token);
+      if (snapshot) {
+        req.permissionSnapshot = snapshot.documentPermission;
+        req.shareToken = token;
+      }
+    } catch {
+      // ignore
+    }
+
+    next();
+  };
+}
+
+export function validateShareLink() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const token = extractShareToken(req);
+    if (!token) {
+      return res.status(400).json({ error: 'Share token is required' });
+    }
+
+    const userContext = req.userContext || extractUserContext(req);
+    const validation = await ShareLinkService.validateAccess(
+      token,
+      undefined,
+      userContext,
+      req.ip,
+      req.headers['user-agent']
+    );
+
+    if (!validation.valid || !validation.link) {
+      return res.status(404).json({ error: validation.reason || 'Invalid or expired share link' });
+    }
+
+    req.shareToken = token;
+    req.permissionSnapshot = validation.link.permissionSnapshot.documentPermission;
+
     next();
   };
 }

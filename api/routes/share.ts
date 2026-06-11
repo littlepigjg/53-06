@@ -37,7 +37,10 @@ router.get('/:token', async (req, res, next) => {
       link.docId,
       paragraphIds,
       userContext,
-      link.permissionSnapshot.documentPermission
+      {
+        permissionOverride: link.permissionSnapshot.documentPermission,
+        paragraphs: parsed.paragraphs,
+      }
     );
 
     const visibleParagraphs = parsed.paragraphs.filter((p) => {

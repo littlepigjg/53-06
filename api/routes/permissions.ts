@@ -26,11 +26,16 @@ router.get('/:docId/effective', async (req, res, next) => {
       req.params.docId,
       (paragraphId as string) || 'document',
       userContext,
-      req.query.forceRefresh === 'true',
-      undefined,
-      parsed.paragraphs
+      {
+        forceRefresh: req.query.forceRefresh === 'true',
+        permissionOverride: req.permissionSnapshot,
+        paragraphs: parsed.paragraphs,
+      }
     );
-    res.json(perm);
+    res.json({
+      ...perm,
+      usingSnapshot: !!req.permissionSnapshot,
+    });
   } catch (e) {
     next(e);
   }
@@ -46,14 +51,19 @@ router.get('/:docId/effective-all', async (req, res, next) => {
       req.params.docId,
       ids,
       userContext,
-      undefined,
-      parsed.paragraphs
+      {
+        permissionOverride: req.permissionSnapshot,
+        paragraphs: parsed.paragraphs,
+      }
     );
     const result: Record<string, unknown> = {};
     perms.forEach((value, key) => {
       result[key] = value;
     });
-    res.json(result);
+    res.json({
+      permissions: result,
+      usingSnapshot: !!req.permissionSnapshot,
+    });
   } catch (e) {
     next(e);
   }
@@ -69,9 +79,15 @@ router.post('/:docId/check', async (req, res, next) => {
       paragraphId || 'document',
       action,
       userContext,
-      parsed.paragraphs
+      {
+        paragraphs: parsed.paragraphs,
+        permissionOverride: req.permissionSnapshot,
+      }
     );
-    res.json({ hasPermission });
+    res.json({ 
+      hasPermission,
+      usingSnapshot: !!req.permissionSnapshot,
+    });
   } catch (e) {
     next(e);
   }
@@ -486,7 +502,7 @@ router.post('/cache/reset-stats', requireAdmin, async (_req, res, next) => {
 
 router.post('/cache/clear/:docId', requireAdmin, async (req, res, next) => {
   try {
-    PermissionService.invalidateCache(req.params.docId);
+    PermissionService.invalidateRealtimeCache(req.params.docId);
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -495,7 +511,16 @@ router.post('/cache/clear/:docId', requireAdmin, async (req, res, next) => {
 
 router.post('/cache/clear-all', requireAdmin, async (_req, res, next) => {
   try {
-    PermissionService.invalidateCache();
+    PermissionService.invalidateAllCache();
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/cache/clear-snapshots', requireAdmin, async (_req, res, next) => {
+  try {
+    PermissionService.invalidateSnapshotCache();
     res.json({ ok: true });
   } catch (e) {
     next(e);

@@ -9,7 +9,7 @@ import reviewRouter from './routes/review.js';
 import exportRouter from './routes/export.js';
 import permissionsRouter from './routes/permissions.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { authMiddleware } from './middleware/authPermission.js';
+import { authMiddleware, attachPermissionSnapshot } from './middleware/authPermission.js';
 import { FileStorageService } from './services/FileStorageService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +26,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(publicDir));
 app.use('/assets', express.static(path.join(distDir, 'assets')));
 app.use(authMiddleware);
+app.use(attachPermissionSnapshot());
 
 app.use('/api/documents', documentsRouter);
 app.use('/api/share', shareRouter);
