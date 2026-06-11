@@ -1,0 +1,65 @@
+[
+  {
+    "id": "ann_mq8w1blf_bwhrqn",
+    "docId": "doc_mq8w1bju_ahmk7d",
+    "paragraphId": "p_mq8w1bjx_77mo3g",
+    "type": "comment",
+    "reviewerName": "张三",
+    "content": "这段描述是否可以更具体一点？",
+    "status": "pending",
+    "createdAt": "2026-06-11T02:38:09.651Z",
+    "updatedAt": "2026-06-11T02:38:09.651Z"
+  },
+  {
+    "id": "ann_mq8w1blp_ixl11z",
+    "docId": "doc_mq8w1bju_ahmk7d",
+    "paragraphId": "p_mq8w1bjx_onc1kk",
+    "type": "suggestion",
+    "reviewerName": "李四",
+    "content": "用分号分隔这些分句，逻辑更清晰",
+    "suggestedText": "主色调采用深蓝色 #1e3a5f，辅色使用琥珀色 #d97706 作为强调；中性色包含从白色到深灰色的九个色阶，用于背景、边框和文字；",
+    "originalText": "主色调采用深蓝色 #1e3a5f，辅色使用琥珀色 #d97706 作为强调。中性色包含从白色到深灰色的九个色阶，用于背景、边框和文字。",
+    "status": "accepted",
+    "createdAt": "2026-06-11T02:38:09.661Z",
+    "updatedAt": "2026-06-11T02:38:09.679Z"
+  },
+  {
+    "id": "ann_mq8x1qsg_ee7vfq",
+    "docId": "doc_mq8w1bju_ahmk7d",
+    "paragraphId": "p_mq8w1bjx_77mo3g",
+    "type": "suggestion",
+    "reviewerName": "测试者A",
+    "content": "这个修改会被应用",
+    "suggestedText": "[已接受的修改] 本文档描述了产品设计的基础规范，包括视觉设计、交互规范和组件使用准则。所有产品设计人员和开发人员都应当遵循本规范，以确保产品体验的一致性。",
+    "originalText": "本文档描述了产品设计的基础规范，包括视觉设计、交互规范和组件使用准则。所有产品设计人员和开发人员都应当遵循本规范，以确保产品体验的一致性。",
+    "status": "accepted",
+    "createdAt": "2026-06-11T03:06:28.960Z",
+    "updatedAt": "2026-06-11T03:06:28.966Z"
+  },
+  {
+    "id": "ann_mq8x1qsp_cswfgl",
+    "docId": "doc_mq8w1bju_ahmk7d",
+    "paragraphId": "p_mq8w1bjx_onc1kk",
+    "type": "suggestion",
+    "reviewerName": "测试者B",
+    "content": "这个修改应该不被应用",
+    "suggestedText": "[已拒绝的修改] 主色调采用深蓝色 #1e3a5f，辅色使用琥珀色 #d97706 作为强调。中性色包含从白色到深灰色的九个色阶，用于背景、边框和文字。",
+    "originalText": "主色调采用深蓝色 #1e3a5f，辅色使用琥珀色 #d97706 作为强调。中性色包含从白色到深灰色的九个色阶，用于背景、边框和文字。",
+    "status": "rejected",
+    "createdAt": "2026-06-11T03:06:28.969Z",
+    "updatedAt": "2026-06-11T03:06:28.973Z"
+  },
+  {
+    "id": "ann_mq8x1qsw_ktglfv",
+    "docId": "doc_mq8w1bju_ahmk7d",
+    "paragraphId": "p_mq8w1bjx_77mo3g",
+    "type": "suggestion",
+    "reviewerName": "测试者C",
+    "content": "这个修改应该不被应用",
+    "suggestedText": "[待处理的修改] 本文档描述了产品设计的基础规范，包括视觉设计、交互规范和组件使用准则。所有产品设计人员和开发人员都应当遵循本规范，以确保产品体验的一致性。",
+    "originalText": "本文档描述了产品设计的基础规范，包括视觉设计、交互规范和组件使用准则。所有产品设计人员和开发人员都应当遵循本规范，以确保产品体验的一致性。",
+    "status": "pending",
+    "createdAt": "2026-06-11T03:06:28.976Z",
+    "updatedAt": "2026-06-11T03:06:28.976Z"
+  }
+]

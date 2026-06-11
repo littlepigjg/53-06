@@ -1,0 +1,104 @@
+{
+  "docId": "doc_mq8w1bju_ahmk7d",
+  "paragraphs": [
+    {
+      "id": "p_mq8w1bjx_xteiq1",
+      "index": 0,
+      "type": "heading",
+      "level": 1,
+      "content": "产品设计规范 v1.0"
+    },
+    {
+      "id": "p_mq8w1bjx_787u9w",
+      "index": 1,
+      "type": "heading",
+      "level": 2,
+      "content": "1. 概述"
+    },
+    {
+      "id": "p_mq8w1bjx_77mo3g",
+      "index": 2,
+      "type": "paragraph",
+      "content": "本文档描述了产品设计的基础规范，包括视觉设计、交互规范和组件使用准则。所有产品设计人员和开发人员都应当遵循本规范，以确保产品体验的一致性。"
+    },
+    {
+      "id": "p_mq8w1bjx_4qigo3",
+      "index": 3,
+      "type": "heading",
+      "level": 2,
+      "content": "2. 视觉设计"
+    },
+    {
+      "id": "p_mq8w1bjx_62mct5",
+      "index": 4,
+      "type": "heading",
+      "level": 3,
+      "content": "2.1 色彩系统"
+    },
+    {
+      "id": "p_mq8w1bjx_onc1kk",
+      "index": 5,
+      "type": "paragraph",
+      "content": "主色调采用深蓝色 #1e3a5f，辅色使用琥珀色 #d97706 作为强调。中性色包含从白色到深灰色的九个色阶，用于背景、边框和文字。"
+    },
+    {
+      "id": "p_mq8w1bjx_x11zyn",
+      "index": 6,
+      "type": "heading",
+      "level": 3,
+      "content": "2.2 字体规范"
+    },
+    {
+      "id": "p_mq8w1bjx_d93x0w",
+      "index": 7,
+      "type": "paragraph",
+      "content": "标题使用 Inter 字体，正文内容使用 Noto Serif SC 字体。代码块使用等宽字体。字号从 12px 到 40px 共八个级别，对应不同的文本层级。"
+    },
+    {
+      "id": "p_mq8w1bjx_ox2i2r",
+      "index": 8,
+      "type": "heading",
+      "level": 2,
+      "content": "3. 组件规范"
+    },
+    {
+      "id": "p_mq8w1bjx_u92okp",
+      "index": 9,
+      "type": "heading",
+      "level": 3,
+      "content": "3.1 按钮"
+    },
+    {
+      "id": "p_mq8w1bjx_zaclmn",
+      "index": 10,
+      "type": "paragraph",
+      "content": "按钮有三种尺寸：小、中、大。主按钮使用深蓝色背景配白色文字，次要按钮使用白色背景配蓝色边框和文字，危险按钮使用红色系。"
+    },
+    {
+      "id": "p_mq8w1bjx_u32zd7",
+      "index": 11,
+      "type": "heading",
+      "level": 3,
+      "content": "3.2 表单"
+    },
+    {
+      "id": "p_mq8w1bjx_ea8n4y",
+      "index": 12,
+      "type": "paragraph",
+      "content": "表单控件统一高度为 40px，圆角 8px，边框默认灰色，聚焦时显示蓝色边框和浅蓝阴影。标签在控件上方，间距 8px。"
+    },
+    {
+      "id": "p_mq8w1bjx_nyxmlf",
+      "index": 13,
+      "type": "heading",
+      "level": 2,
+      "content": "4. 交互规范"
+    },
+    {
+      "id": "p_mq8w1bjx_03s0a8",
+      "index": 14,
+      "type": "paragraph",
+      "content": "所有操作都应有即时反馈。按钮点击后会有视觉反馈（变色、阴影变化），耗时超过 300ms 的操作需显示加载状态。表单提交前必须进行前端校验，并在错误字段附近显示错误提示。"
+    }
+  ]
+}
